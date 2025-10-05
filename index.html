@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Global Storage Supabase</title>
+  <script src="https://unpkg.com/@supabase/supabase-js"></script>
+  <script>
+    const SUPABASE_URL = "https://amgamzesrbysxmkhanfi.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFtZ2FtemVzcmJ5c3hta2hhbmZpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkyNDc2MDcsImV4cCI6MjA3NDgyMzYwN30.PS3tqJ8VE_1y8JLz4R62MocaWZiLL_gOaGSC_eFqcsw";
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // Submit data
+    async function submitData() {
+      const nameInput = document.getElementById("nameInput");
+      const textInput = document.getElementById("textInput");
+      const nama = nameInput.value.trim();
+      const text = textInput.value.trim();
+
+      if (nama !== "" && text !== "") {
+        const { error } = await supabaseClient
+          .from("global_data")
+          .insert([{ nama, text }]);
+
+        if (error) {
+          alert("Gagal simpan: " + error.message);
+        } else {
+          nameInput.value = "";
+          textInput.value = "";
+          await loadMessages();     // update daftar pesan
+          await loadNames();        // update daftar nama
+        }
+      } else {
+        alert("Isi nama dan pesan dulu!");
+      }
+    }
+
+    // Menampilkan daftar pesan
+    async function loadMessages() {
+      const { data, error } = await supabaseClient
+        .from("global_data")
+        .select("*")
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.error(error);
+      } else {
+        const outputDiv = document.getElementById("out");
+        outputDiv.innerHTML = "";
+
+        data.forEach((row, i) => {
+          outputDiv.innerHTML += `
+            ${i+1}. <b>Nama:</b> ${row.nama}<br>
+            &nbsp;&nbsp;&nbsp;<b>Pesan:</b> ${row.text}<br><br>
+          `;
+        });
+      }
+    }
+
+    // Menampilkan daftar nama saja
+    async function loadNames() {
+      const { data, error } = await supabaseClient
+        .from("global_data")
+        .select("nama")
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.error(error);
+      } else {
+        const outputDiv = document.getElementById("output_2");
+        outputDiv.innerHTML = "";
+
+        data.forEach((row, i) => {
+          outputDiv.innerHTML += `${i+1}. <b>Nama: </b>${row.nama}<br>`;
+        });
+      }
+    }
+
+    // Jalankan saat halaman dibuka
+    window.onload = async () => {
+      await loadMessages();
+      await loadNames();
+    };
+  </script>
+</head>
+<body>
+  <center>
+    <h1>Public chat</h1>
+
+    <!-- Input Nama + Pesan -->
+    <input type="text" id="nameInput" placeholder="Nama Anda" /><br><br>
+    <input type="text" id="textInput" placeholder="Pendapat Anda" />
+    <button onclick="submitData()">Submit</button>
+
+    <!-- Daftar Pesan -->
+    <div id="out" style="border:3px solid black; padding:10px; width:300px; height:200px; overflow-y:auto; margin-top:10px;">
+      Data pesan dari server akan tampil di sini...
+    </div>
+
+    <h2>Daftar Nama</h2>
+    <div id="output_2" style="border:3px solid black; padding:10px; width:300px; height:200px; overflow-y:auto; margin-top:10px;">
+      Daftar nama akan tampil di sini...
+    </div>
+
+    <h2>Apa pendapat anda tentang ini? Silakan tulis di atas</h2>
+  </center>
+</body>
+</html>
