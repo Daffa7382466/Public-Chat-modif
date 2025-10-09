@@ -3,32 +3,260 @@
 <head>
   <meta charset="UTF-8">
   <title>Global Storage Supabase</title>
-  <style>
-    body {
-      display: flex;
-      justify-content: center;  /* Tengah horizontal */
-      align-items: center;      /* Tengah vertikal */
-      height: 100vh;            /* Penuhi tinggi layar */
-      margin: 0;
-      background-color: #f9f9f9; /* (Opsional) Tambah warna latar */
-      font-family: Arial, sans-serif;
-      text-align: center;       /* Tengahin teks di dalam div */
+  <script src="https://unpkg.com/@supabase/supabase-js"></script>
+  <script>
+    /* ---------------- CONFIG SUPABASE ---------------- */
+    const SUPABASE_URL = "https://amgamzesrbysxmkhanfi.supabase.co"; // GANTI PUNYA KAMU
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."; // GANTI PUNYA KAMU
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    /* ---------------- CONSTANTS ---------------- */
+    const PRESENCE_HEARTBEAT_MS = 15000; // kirim heartbeat tiap 15 detik
+    const ONLINE_THRESHOLD_MS = 30000;   // dianggap online kalau aktif <30 detik
+    const LOCAL_NAME_KEY = "global_chat_nama"; // kunci localStorage
+
+    /* ---------------- LOCAL STORAGE (Anti-SPY) ---------------- */
+    function saveNameToLocalStorage(nama) {
+      try { localStorage.setItem(LOCAL_NAME_KEY, nama); } catch (e) {}
+    }
+    function getNameFromLocalStorage() {
+      try { return localStorage.getItem(LOCAL_NAME_KEY) || ""; } catch (e) { return ""; }
+    }
+    function clearNameFromLocalStorage() {
+      try { localStorage.removeItem(LOCAL_NAME_KEY); } catch (e) {}
     }
 
-    .container {
-      max-width: 600px;         /* Biar teks nggak terlalu panjang */
-      padding: 20px;
+    /* ---------------- UI ---------------- */
+    function showStoredNameUI(nama) {
+      const nameInput = document.getElementById("nameInput");
+      if (!nameInput) return;
+      if (nama && nama.trim() !== "") {
+        nameInput.value = nama;
+        nameInput.disabled = true;
+      } else {
+        nameInput.value = "";
+        nameInput.disabled = false;
+      }
     }
-  </style>
+
+    /* ---------------- SUBMIT PESAN ---------------- */
+    async function submitData() {
+      const nameInput = document.getElementById("nameInput");
+      const textInput = document.getElementById("textInput");
+      let nama = (getNameFromLocalStorage() || nameInput.value || "").trim();
+      const text = (textInput.value || "").trim();
+
+      if (!nama) { alert("Masukkan nama dulu!"); return; }
+      if (!text) { alert("Isi pesan dulu!"); return; }
+
+      saveNameToLocalStorage(nama);
+      showStoredNameUI(nama);
+
+      const { error } = await supabaseClient
+        .from("global_data")
+        .insert([{ nama, text }]);
+
+      if (error) {
+        alert("Gagal simpan: " + error.message);
+      } else {
+        textInput.value = "";
+        await loadMessages();
+        await loadNames();
+        await sendPresenceHeartbeat();
+      }
+    }
+
+    /* ---------------- GANTI NAMA ---------------- */
+    function enableChangeName() {
+      clearNameFromLocalStorage();
+      showStoredNameUI("");
+      document.getElementById("nameInput").focus();
+      alert("Nama kamu dihapus. Silakan isi nama baru.");
+    }
+
+    /* ---------------- PRESENCE ---------------- */
+    let presenceIntervalId = null;
+
+    async function sendPresenceHeartbeat() {
+      const nama = getNameFromLocalStorage() || document.getElementById("nameInput").value.trim();
+      if (!nama) return;
+      const now = new Date().toISOString();
+
+      const { error } = await supabaseClient
+        .from("presence")
+        .upsert(
+          { nama, last_seen: now, is_bot: false },
+          { onConflict: ["nama"] }
+        );
+
+      if (error) console.warn("Heartbeat error:", error.message);
+    }
+
+    function startPresenceHeartbeat() {
+      sendPresenceHeartbeat();
+      if (presenceIntervalId) clearInterval(presenceIntervalId);
+      presenceIntervalId = setInterval(sendPresenceHeartbeat, PRESENCE_HEARTBEAT_MS);
+    }
+
+    async function loadOnlineUsers() {
+      const { data, error } = await supabaseClient
+        .from("presence")
+        .select("*")
+        .order("last_seen", { ascending: false });
+
+      const nowMs = Date.now();
+      const out = document.getElementById("online_out");
+      if (!out) return;
+
+      if (error) {
+        out.innerHTML = "<i>Gagal memuat data online...</i>";
+        return;
+      }
+
+      const online = (data || []).filter(row => {
+        if (!row.last_seen) return false;
+        const diff = nowMs - Date.parse(row.last_seen);
+        return diff <= ONLINE_THRESHOLD_MS;
+      });
+
+      out.innerHTML = "";
+      if (online.length === 0) {
+        out.innerHTML = "<i>Tidak ada yang online</i>";
+      } else {
+        online.forEach((row, i) => {
+          const botLabel = row.is_bot ? " 🤖" : "";
+          out.innerHTML += `${i+1}. <b>${row.nama}</b>${botLabel}<br>`;
+        });
+      }
+    }
+
+    /* ---------------- CHAT ---------------- */
+    async function loadMessages() {
+      const { data, error } = await supabaseClient
+        .from("global_data")
+        .select("*")
+        .order("created_at", { ascending: true });
+
+      const outputDiv = document.getElementById("out");
+      outputDiv.innerHTML = "";
+      if (error) {
+        outputDiv.innerHTML = "Gagal memuat pesan.";
+        return;
+      }
+
+      data.forEach((row, i) => {
+        outputDiv.innerHTML += `
+          ${i+1}. <b>Nama:</b> ${row.nama}<br>
+          &nbsp;&nbsp;&nbsp;<b>Pesan:</b> ${row.text}<br><br>
+        `;
+      });
+    }
+
+    async function loadNames() {
+      const { data, error } = await supabaseClient
+        .from("global_data")
+        .select("nama")
+        .order("created_at", { ascending: true });
+
+      const outputDiv = document.getElementById("output_2");
+      outputDiv.innerHTML = "";
+      if (error) {
+        outputDiv.innerHTML = "Gagal memuat nama.";
+        return;
+      }
+
+      data.forEach((row, i) => {
+        outputDiv.innerHTML += `${i+1}. <b>Nama:</b> ${row.nama}<br>`;
+      });
+    }
+
+    /* ---------------- TOGGLE MENU RAHASIA ---------------- */
+    function toggleHiddenMenu() {
+      const btn = document.getElementById("changeNameBtn");
+      if (btn.style.display === "none" || btn.style.display === "") {
+        btn.style.display = "inline-block";
+        btn.style.opacity = "1";
+      } else {
+        btn.style.opacity = "0";
+        setTimeout(() => { btn.style.display = "none"; }, 300);
+      }
+    }
+
+    /* ---------------- STARTUP ---------------- */
+    window.onload = async () => {
+      const stored = getNameFromLocalStorage();
+      showStoredNameUI(stored);
+      await loadMessages();
+      await loadNames();
+      startPresenceHeartbeat();
+      await loadOnlineUsers();
+      setInterval(loadOnlineUsers, 5000);
+    };
+  </script>
 </head>
+
 <body>
-  <div class="container">
-    <h1><b>Kode/Web sedang diperbaiki sekarang...</b></h1>
-    <p>
-      Kode/Web sedang diperbaiki karena banyak sekali keluhan <b>spy</b>. 
-      Mungkin operator akan memperbaikinya secepatnya.
-    </p>
-  </div>
+  <center>
+    <h1>Public Chat</h1>
+
+    <!-- Input Nama + Pesan -->
+    <input type="text" id="nameInput" placeholder="Nama Anda" /><br><br>
+    <input type="text" id="textInput" placeholder="Pendapat Anda" />
+    <button onclick="submitData()">Submit</button>
+
+    <!-- Daftar Pesan -->
+    <div id="out" style="border:3px solid black; padding:10px; width:300px; height:200px; overflow-y:auto; margin-top:10px;">
+      Data pesan akan tampil di sini...
+    </div>
+
+    <h2>Daftar Nama</h2>
+    <div id="output_2" style="border:3px solid black; padding:10px; width:300px; height:200px; overflow-y:auto; margin-top:10px;">
+      Daftar nama akan tampil di sini...
+    </div>
+
+    <h2>Siapa yang Online</h2>
+    <div id="online_out" style="border:3px solid black; padding:10px; width:300px; height:150px; overflow-y:auto; margin-top:10px;">
+      Memeriksa online...
+    </div>
+
+    <!-- Tombol tersembunyi -->
+    <div id="hiddenMenu" style="position:relative; margin-top:15px;">
+      <button id="moreBtn"
+        onclick="toggleHiddenMenu()"
+        style="
+          background: rgba(0,0,0,0.03);
+          border: none;
+          color: rgba(0,0,0,0.08);
+          font-size: 10px;
+          cursor: pointer;
+          position: relative;
+          top: 3px;
+          left: 130px;
+          transition: all 0.4s ease;
+        "
+        onmouseover="this.style.color='rgba(0,0,0,0.3)'"
+        onmouseout="this.style.color='rgba(0,0,0,0.08)'">
+        more
+      </button>
+
+      <button id="changeNameBtn"
+        onclick="enableChangeName()"
+        style="
+          display: none;
+          opacity: 0;
+          background: #eee;
+          border: 1px solid #ccc;
+          border-radius: 5px;
+          font-size: 11px;
+          margin-left: 5px;
+          cursor: pointer;
+          transition: opacity 0.3s ease;
+        ">
+        Ganti Nama
+      </button>
+    </div>
+
+    <h3 style="margin-top:20px;">Apa pendapat anda tentang ini? Silakan tulis di atas</h3>
+  </center>
 </body>
 </html>
-
